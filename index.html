@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EGSA '87 Coordinates</title>
+    <title>Field GNSS EGSA87 Logger</title>
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#10b981">
-    <!-- Proj4js για τον μετασχηματισμό WGS84 -> EGSA87 (EPSG:2100) -->
+    <!-- Proj4js για τον μετασχηματισμό WGS84 <-> EGSA87 (EPSG:2100) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
     <style>
         :root {
@@ -87,15 +87,26 @@
             background-color: #94a3b8;
             cursor: not-allowed;
         }
-        .btn-danger {
-            background-color: #ef4444;
+        .btn-danger { background-color: #ef4444; }
+        .btn-csv { background-color: #0284c7; }
+        .btn-kml { background-color: #7c3aed; }
+        .btn-import { background-color: #d97706; }
+        
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+            width: 100%;
         }
-        .btn-csv {
-            background-color: #0284c7;
+        .file-input-wrapper input[type=file] {
+            font-size: 100px;
+            position: absolute;
+            left: 0;
+            top: 0;
+            opacity: 0;
+            cursor: pointer;
         }
-        .btn-kml {
-            background-color: #7c3aed;
-        }
+
         table {
             width: 100%;
             border-collapse: collapse;
@@ -107,9 +118,7 @@
             padding: 6px;
             text-align: center;
         }
-        th {
-            background-color: #e2e8f0;
-        }
+        th { background-color: #e2e8f0; }
         .timer-display {
             font-size: 1.8rem;
             text-align: center;
@@ -117,12 +126,29 @@
             color: var(--primary-dark);
             margin: 10px 0;
         }
+        .geom-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            font-size: 0.85rem;
+        }
+        .geom-item {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            padding: 8px;
+            border-radius: 6px;
+        }
+        .geom-item span {
+            font-weight: bold;
+            color: #0f172a;
+            display: block;
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>EGSA '87 Coordinates</h2>
+    <h2>GNSS Field Logger (ΕΓΣΑ '87)</h2>
 
     <!-- Live Status Panel -->
     <div class="card">
@@ -153,15 +179,38 @@
         <button id="btnStop" class="btn-danger" onclick="stopMeasurement()" style="display:none;">Ακύρωση Μέτρησης</button>
     </div>
 
-    <!-- Points List Panel -->
+    <!-- Import & Export Panel -->
     <div class="card">
-        <div style="margin-bottom: 8px;">
-            <h3 style="margin:0 0 8px 0; font-size:1rem;">Αποθηκευμένα Σημεία (<span id="pointCount">0</span>)</h3>
-            <div style="display: flex; gap: 8px;">
-                <button class="btn-csv" onclick="exportCSV()" style="flex: 1; padding: 8px; margin:0; font-size:0.85rem;">Εξαγωγή CSV</button>
-                <button class="btn-kml" onclick="exportKML()" style="flex: 1; padding: 8px; margin:0; font-size:0.85rem;">Εξαγωγή KML</button>
+        <h3 style="margin:0 0 8px 0; font-size:1rem;">Διαχείριση Δεδομένων</h3>
+        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+            <div class="file-input-wrapper" style="flex: 1;">
+                <button class="btn-import" style="margin:0; padding:8px; font-size:0.85rem;">Import CSV</button>
+                <input type="file" id="csvFileInput" accept=".csv" onchange="importCSV(event)">
+            </div>
+            <div class="file-input-wrapper" style="flex: 1;">
+                <button class="btn-import" style="margin:0; padding:8px; font-size:0.85rem;">Import KML</button>
+                <input type="file" id="kmlFileInput" accept=".kml" onchange="importKML(event)">
             </div>
         </div>
+        <div style="display: flex; gap: 8px;">
+            <button class="btn-csv" onclick="exportCSV()" style="flex: 1; padding: 8px; margin:0; font-size:0.85rem;">Export CSV</button>
+            <button class="btn-kml" onclick="exportKML()" style="flex: 1; padding: 8px; margin:0; font-size:0.85rem;">Export KML</button>
+        </div>
+    </div>
+
+    <!-- Polygon Geometry Panel -->
+    <div class="card">
+        <h3 style="margin:0 0 8px 0; font-size:1rem;">Γεωμετρία Πολυγώνου (<span id="polyCount">0</span> σημεία)</h3>
+        <div class="geom-grid">
+            <div class="geom-item">Περίμετρος: <span id="polyPerimeter">-</span></div>
+            <div class="geom-item">Εμβαδό (m²): <span id="polyAreaM2">-</span></div>
+            <div class="geom-item" style="grid-column: span 2;">Εμβαδό (Στρέμματα): <span id="polyAreaStrem">-</span></div>
+        </div>
+    </div>
+
+    <!-- Points List Panel -->
+    <div class="card">
+        <h3 style="margin:0 0 8px 0; font-size:1rem;">Αποθηκευμένα Σημεία (<span id="pointCount">0</span>)</h3>
         <div style="overflow-x: auto; max-height: 200px;">
             <table id="pointsTable">
                 <thead>
@@ -182,7 +231,6 @@
 </div>
 
 <script>
-    // Ορισμός Συστήματος ΕΓΣΑ87 (EPSG:2100) στο Proj4js
     proj4.defs("EPSG:2100", "+proj=tmerc +lat_0=0 +lon_0=24 +k=0.9996 +x_0=500000 +y_0=0 +ellps=GRS80 +towgs84=-199.87,74.79,246.62,0,0,0,0 +units=m +no_defs");
 
     let watchId = null;
@@ -192,7 +240,6 @@
     let sampleBuffer = [];
     let countdownTimer = null;
 
-    // Παρακολούθηση ενσωματωμένου/συνδεδεμένου GNSS δέκτη μέσω Browser Geolocation API
     if ("geolocation" in navigator) {
         navigator.geolocation.watchPosition(
             (position) => {
@@ -204,7 +251,6 @@
                 document.getElementById("gpsStatus").innerText = "Συνδεδεμένο";
                 document.getElementById("gpsAcc").innerText = currentAcc.toFixed(1);
 
-                // Μετατροπή σε ΕΓΣΑ87 live για προεπισκόπηση
                 let egsa = proj4("EPSG:4326", "EPSG:2100", [currentLon, currentLat]);
                 document.getElementById("liveX").innerText = egsa[0].toFixed(2);
                 document.getElementById("liveY").innerText = egsa[1].toFixed(2);
@@ -280,7 +326,6 @@
             return;
         }
 
-        // Υπολογισμός μέσου όρου (Averaging) από το buffer
         let sumX = 0, sumY = 0, sumZ = 0, sumAcc = 0, sumLat = 0, sumLon = 0;
         let count = sampleBuffer.length;
 
@@ -293,41 +338,33 @@
             sumLon += pt.lon;
         });
 
-        let meanX = sumX / count;
-        let meanY = sumY / count;
-        let meanZ = sumZ / count;
-        let meanAcc = sumAcc / count;
-        let meanLat = sumLat / count;
-        let meanLon = sumLon / count;
-
         let name = document.getElementById("pointName").value;
 
-        // Αποθήκευση σημείου στη λίστα (μαζί με WGS84 για KML)
         pointsList.push({
             name: name,
-            x: meanX,
-            y: meanY,
-            z: meanZ,
-            error: meanAcc,
-            lat: meanLat,
-            lon: meanLon
+            x: sumX / count,
+            y: sumY / count,
+            z: sumZ / count,
+            error: sumAcc / count,
+            lat: sumLat / count,
+            lon: sumLon / count
         });
 
         updateTable();
+        updateGeometry();
 
-        // Αυτόματη αύξηση ονόματος σημείου (π.χ. P1 -> P2)
         let nextNum = parseInt(name.replace(/^\D+/g, '')) + 1;
         if (!isNaN(nextNum)) {
             document.getElementById("pointName").value = "P" + nextNum;
         }
 
-        alert(`Το σημείο ${name} αποθηκεύτηκε επιτυχώς με ${count} μετρήσεις.`);
+        alert(`Το σημείο ${name} αποθηκεύτηκε επιτυχώς.`);
     }
 
     function updateTable() {
         let tbody = document.getElementById("pointsTable").getElementsByTagName("tbody")[0];
         tbody.innerHTML = "";
-        pointsList.forEach((pt, index) => {
+        pointsList.forEach((pt) => {
             let row = tbody.insertRow();
             row.insertCell(0).innerText = pt.name;
             row.insertCell(1).innerText = pt.x.toFixed(3);
@@ -338,86 +375,158 @@
         document.getElementById("pointCount").innerText = pointsList.length;
     }
 
-    function exportCSV() {
-        if (pointsList.length === 0) {
-            alert("Δεν υπάρχουν σημεία προς εξαγωγή.");
+    function updateGeometry() {
+        let n = pointsList.length;
+        if (n < 3) {
+            document.getElementById('polyCount').innerText = n;
+            document.getElementById('polyPerimeter').innerText = "-";
+            document.getElementById('polyAreaM2').innerText = "-";
+            document.getElementById('polyAreaStrem').innerText = "-";
             return;
         }
 
-        let csvContent = "data:text/csv;charset=utf-8,Point,X_EGSA87,Y_EGSA87,Z_Elev,Error_m\r\n";
-        pointsList.forEach(pt => {
-            csvContent += `${pt.name},${pt.x.toFixed(3)},${pt.y.toFixed(3)},${pt.z.toFixed(2)},${pt.error.toFixed(2)}\r\n`;
-        });
+        let perimeter = 0;
+        let doubleArea = 0;
 
-        let encodedUri = encodeURI(csvContent);
+        for (let i = 0; i < n; i++) {
+            let p1 = pointsList[i];
+            let p2 = pointsList[(i + 1) % n];
+
+            let dx = p2.x - p1.x;
+            let dy = p2.y - p1.y;
+            perimeter += Math.sqrt(dx * dx + dy * dy);
+
+            doubleArea += (p1.x * p2.y) - (p2.x * p1.y);
+        }
+
+        let areaM2 = Math.abs(doubleArea) / 2.0;
+        let areaStremmata = areaM2 / 1000.0;
+
+        document.getElementById('polyCount').innerText = n;
+        document.getElementById('polyPerimeter').innerText = perimeter.toFixed(2) + " m";
+        document.getElementById('polyAreaM2').innerText = areaM2.toFixed(2) + " m²";
+        document.getElementById('polyAreaStrem').innerText = areaStremmata.toFixed(3) + " στρ.";
+    }
+
+    function importCSV(event) {
+        let file = event.target.files[0];
+        if (!file) return;
+        let reader = new FileReader();
+        reader.onload = function(e) {
+            let lines = e.target.result.split(/\r\n|\n/);
+            let count = 0;
+            for (let i = 1; i < lines.length; i++) {
+                let line = lines[i].trim();
+                if (!line) continue;
+                let cols = line.split(',');
+                if (cols.length >= 3) {
+                    let name = cols[0].trim();
+                    let x = parseFloat(cols[1]);
+                    let y = parseFloat(cols[2]);
+                    let z = cols[3] ? parseFloat(cols[3]) : 0.0;
+                    let err = cols[4] ? parseFloat(cols[4]) : 0.0;
+
+                    let wgs84 = proj4("EPSG:2100", "EPSG:4326", [x, y]);
+
+                    pointsList.push({
+                        name: name,
+                        x: x,
+                        y: y,
+                        z: z,
+                        error: err,
+                        lat: wgs84[1],
+                        lon: wgs84[0]
+                    });
+                    count++;
+                }
+            }
+            updateTable();
+            updateGeometry();
+            event.target.value = '';
+            alert(`Εισήχθησαν ${count} σημεία από CSV.`);
+        };
+        reader.readAsText(file);
+    }
+
+    function importKML(event) {
+        let file = event.target.files[0];
+        if (!file) return;
+        let reader = new FileReader();
+        reader.onload = function(e) {
+            let parser = new DOMParser();
+            let xmlDoc = parser.parseFromString(e.target.result, "text/xml");
+            let placemarks = xmlDoc.getElementsByTagName("Placemark");
+            let count = 0;
+
+            for (let i = 0; i < placemarks.length; i++) {
+                let pm = placemarks[i];
+                let nameElem = pm.getElementsByTagName("name")[0];
+                let name = nameElem ? nameElem.textContent.trim() : `KML_${i+1}`;
+                
+                let coordElem = pm.getElementsByTagName("coordinates")[0];
+                if (coordElem) {
+                    let firstCoord = coordElem.textContent.trim().split(/\s+/)[0];
+                    let parts = firstCoord.split(',');
+                    if (parts.length >= 2) {
+                        let lon = parseFloat(parts[0]);
+                        let lat = parseFloat(parts[1]);
+                        let alt = parts[2] ? parseFloat(parts[2]) : 0;
+
+                        let egsa = proj4("EPSG:4326", "EPSG:2100", [lon, lat]);
+
+                        pointsList.push({
+                            name: name,
+                            x: egsa[0],
+                            y: egsa[1],
+                            z: alt,
+                            error: 0.0,
+                            lat: lat,
+                            lon: lon
+                        });
+                        count++;
+                    }
+                }
+            }
+            updateTable();
+            updateGeometry();
+            event.target.value = '';
+            alert(`Εισήχθησαν ${count} σημεία από KML.`);
+        };
+        reader.readAsText(file);
+    }
+
+    function exportCSV() {
+        if (pointsList.length === 0) { alert("Δεν υπάρχουν σημεία."); return; }
+        let csv = "Point,X_EGSA87,Y_EGSA87,Z_Elev,Error_m\r\n";
+        pointsList.forEach(pt => {
+            csv += `${pt.name},${pt.x.toFixed(3)},${pt.y.toFixed(3)},${pt.z.toFixed(2)},${pt.error.toFixed(2)}\r\n`;
+        });
         let link = document.createElement("a");
-        link.setAttribute("href", encodedUri);
-        link.setAttribute("download", "gnss_points_egsa87.csv");
-        document.body.appendChild(link);
+        link.href = encodeURI("data:text/csv;charset=utf-8," + csv);
+        link.download = "gnss_points_egsa87.csv";
         link.click();
-        document.body.removeChild(link);
     }
 
     function exportKML() {
-        if (pointsList.length === 0) {
-            alert("Δεν υπάρχουν σημεία προς εξαγωγή.");
-            return;
-        }
-
-        let kml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
-        kml += `<kml xmlns="http://www.opengis.net/kml/2.2">\n`;
-        kml += `<Document>\n`;
-        kml += `  <name>GNSS Points - EGSA87</name>\n`;
-
+        if (pointsList.length === 0) { alert("Δεν υπάρχουν σημεία."); return; }
+        let kml = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n<Document>\n`;
         pointsList.forEach(pt => {
-            kml += `  <Placemark>\n`;
-            kml += `    <name>${escapeXML(pt.name)}</name>\n`;
-            kml += `    <description><![CDATA[` +
-                   `<b>Όνομα:</b> ${escapeXML(pt.name)}<br/>` +
-                   `<b>X (ΕΓΣΑ87):</b> ${pt.x.toFixed(3)} m<br/>` +
-                   `<b>Y (ΕΓΣΑ87):</b> ${pt.y.toFixed(3)} m<br/>` +
-                   `<b>Z (Υψόμετρο):</b> ${pt.z.toFixed(2)} m<br/>` +
-                   `<b>Σφάλμα:</b> ${pt.error.toFixed(2)} m` +
-                   `]]></description>\n`;
-            kml += `    <Point>\n`;
-            // KML syntax: longitude,latitude,altitude
-            kml += `      <coordinates>${pt.lon},${pt.lat},${pt.z}</coordinates>\n`;
-            kml += `    </Point>\n`;
-            kml += `  </Placemark>\n`;
+            kml += `  <Placemark>\n    <name>${pt.name}</name>\n` +
+                   `    <description><![CDATA[X: ${pt.x.toFixed(3)} m<br/>Y: ${pt.y.toFixed(3)} m<br/>Z: ${pt.z.toFixed(2)} m]]></description>\n` +
+                   `    <Point><coordinates>${pt.lon},${pt.lat},${pt.z}</coordinates></Point>\n  </Placemark>\n`;
         });
-
-        kml += `</Document>\n`;
-        kml += `</kml>`;
-
+        kml += `</Document>\n</kml>`;
         let blob = new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' });
-        let url = URL.createObjectURL(blob);
         let link = document.createElement("a");
-        link.setAttribute("href", url);
-        link.setAttribute("download", "gnss_points_egsa87.kml");
-        document.body.appendChild(link);
+        link.href = URL.createObjectURL(blob);
+        link.download = "gnss_points_egsa87.kml";
         link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
+        URL.revokeObjectURL(link.href);
     }
 
-    function escapeXML(str) {
-        return str.replace(/[<>&'"]/g, function (c) {
-            switch (c) {
-                case '<': return '&lt;';
-                case '>': return '&gt;';
-                case '&': return '&amp;';
-                case '\'': return '&apos;';
-                case '"': return '&quot;';
-            }
-        });
-    }
-
-    // Εγγραφή Service Worker για Offline λειτουργία
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-            navigator.serviceWorker.register('./sw.js')
-                .then((reg) => console.log('Service Worker registered successfully!', reg.scope))
-                .catch((err) => console.log('Service Worker registration failed:', err));
+            navigator.serviceWorker.register('./sw.js').catch(err => console.log(err));
         });
     }
 </script>
