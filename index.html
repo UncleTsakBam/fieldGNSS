@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html lang="el">
 <head>
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#10b981">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Field GNSS EGSA87 Logger</title>
+    <title>EGSA '87 Coordinates</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#10b981">
     <!-- Proj4js για τον μετασχηματισμό WGS84 -> EGSA87 (EPSG:2100) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
     <style>
@@ -90,6 +90,12 @@
         .btn-danger {
             background-color: #ef4444;
         }
+        .btn-csv {
+            background-color: #0284c7;
+        }
+        .btn-kml {
+            background-color: #7c3aed;
+        }
         table {
             width: 100%;
             border-collapse: collapse;
@@ -116,7 +122,7 @@
 <body>
 
 <div class="container">
-    <h2>GNSS Field Logger (ΕΓΣΑ '87)</h2>
+    <h2>EGSA '87 Coordinates</h2>
 
     <!-- Live Status Panel -->
     <div class="card">
@@ -149,9 +155,12 @@
 
     <!-- Points List Panel -->
     <div class="card">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <h3 style="margin:0; font-size:1rem;">Αποθηκευμένα Σημεία (<span id="pointCount">0</span>)</h3>
-            <button onclick="exportCSV()" style="width: auto; padding: 6px 12px; margin:0; font-size:0.85rem;">Export CSV</button>
+        <div style="margin-bottom: 8px;">
+            <h3 style="margin:0 0 8px 0; font-size:1rem;">Αποθηκευμένα Σημεία (<span id="pointCount">0</span>)</h3>
+            <div style="display: flex; gap: 8px;">
+                <button class="btn-csv" onclick="exportCSV()" style="flex: 1; padding: 8px; margin:0; font-size:0.85rem;">Εξαγωγή CSV</button>
+                <button class="btn-kml" onclick="exportKML()" style="flex: 1; padding: 8px; margin:0; font-size:0.85rem;">Εξαγωγή KML</button>
+            </div>
         </div>
         <div style="overflow-x: auto; max-height: 200px;">
             <table id="pointsTable">
@@ -272,7 +281,7 @@
         }
 
         // Υπολογισμός μέσου όρου (Averaging) από το buffer
-        let sumX = 0, sumY = 0, sumZ = 0, sumAcc = 0;
+        let sumX = 0, sumY = 0, sumZ = 0, sumAcc = 0, sumLat = 0, sumLon = 0;
         let count = sampleBuffer.length;
 
         sampleBuffer.forEach(pt => {
@@ -280,22 +289,28 @@
             sumY += pt.y;
             sumZ += pt.alt;
             sumAcc += pt.acc;
+            sumLat += pt.lat;
+            sumLon += pt.lon;
         });
 
         let meanX = sumX / count;
         let meanY = sumY / count;
         let meanZ = sumZ / count;
-        let meanAcc = sumAcc / count; // Εκτίμηση μέσου σφάλματος
+        let meanAcc = sumAcc / count;
+        let meanLat = sumLat / count;
+        let meanLon = sumLon / count;
 
         let name = document.getElementById("pointName").value;
 
-        // Αποθήκευση σημείου στη λίστα
+        // Αποθήκευση σημείου στη λίστα (μαζί με WGS84 για KML)
         pointsList.push({
             name: name,
             x: meanX,
             y: meanY,
             z: meanZ,
-            error: meanAcc
+            error: meanAcc,
+            lat: meanLat,
+            lon: meanLon
         });
 
         updateTable();
@@ -343,6 +358,61 @@
         document.body.removeChild(link);
     }
 
+    function exportKML() {
+        if (pointsList.length === 0) {
+            alert("Δεν υπάρχουν σημεία προς εξαγωγή.");
+            return;
+        }
+
+        let kml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+        kml += `<kml xmlns="http://www.opengis.net/kml/2.2">\n`;
+        kml += `<Document>\n`;
+        kml += `  <name>GNSS Points - EGSA87</name>\n`;
+
+        pointsList.forEach(pt => {
+            kml += `  <Placemark>\n`;
+            kml += `    <name>${escapeXML(pt.name)}</name>\n`;
+            kml += `    <description><![CDATA[` +
+                   `<b>Όνομα:</b> ${escapeXML(pt.name)}<br/>` +
+                   `<b>X (ΕΓΣΑ87):</b> ${pt.x.toFixed(3)} m<br/>` +
+                   `<b>Y (ΕΓΣΑ87):</b> ${pt.y.toFixed(3)} m<br/>` +
+                   `<b>Z (Υψόμετρο):</b> ${pt.z.toFixed(2)} m<br/>` +
+                   `<b>Σφάλμα:</b> ${pt.error.toFixed(2)} m` +
+                   `]]></description>\n`;
+            kml += `    <Point>\n`;
+            // KML syntax: longitude,latitude,altitude
+            kml += `      <coordinates>${pt.lon},${pt.lat},${pt.z}</coordinates>\n`;
+            kml += `    </Point>\n`;
+            kml += `  </Placemark>\n`;
+        });
+
+        kml += `</Document>\n`;
+        kml += `</kml>`;
+
+        let blob = new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' });
+        let url = URL.createObjectURL(blob);
+        let link = document.createElement("a");
+        link.setAttribute("href", url);
+        link.setAttribute("download", "gnss_points_egsa87.kml");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    }
+
+    function escapeXML(str) {
+        return str.replace(/[<>&'"]/g, function (c) {
+            switch (c) {
+                case '<': return '&lt;';
+                case '>': return '&gt;';
+                case '&': return '&amp;';
+                case '\'': return '&apos;';
+                case '"': return '&quot;';
+            }
+        });
+    }
+
+    // Εγγραφή Service Worker για Offline λειτουργία
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
             navigator.serviceWorker.register('./sw.js')
@@ -350,8 +420,6 @@
                 .catch((err) => console.log('Service Worker registration failed:', err));
         });
     }
-
-
 </script>
 
 </body>
