@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#10b981">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Field GNSS EGSA87 Logger</title>
+    <!-- Proj4js για τον μετασχηματισμό WGS84 -> EGSA87 (EPSG:2100) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
+    <style>
+        :root {
+            --primary: #10b981;
+            --primary-dark: #059669;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --text: #1e293b;
+            --border: #cbd5e1;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 10px;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        h2 {
+            text-align: center;
+            color: var(--text);
+            font-size: 1.4rem;
+            margin-bottom: 10px;
+        }
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .status-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            font-size: 0.9rem;
+        }
+        .status-item {
+            background: #f1f5f9;
+            padding: 8px;
+            border-radius: 8px;
+        }
+        .status-item span {
+            font-weight: bold;
+            display: block;
+            color: #0f172a;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        select, input, button {
+            width: 100%;
+            padding: 12px;
+            font-size: 1rem;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-sizing: border-box;
+            margin-bottom: 10px;
+        }
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        button:active {
+            background-color: var(--primary-dark);
+        }
+        button:disabled {
+            background-color: #94a3b8;
+            cursor: not-allowed;
+        }
+        .btn-danger {
+            background-color: #ef4444;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+            margin-top: 10px;
+        }
+        th, td {
+            border: 1px solid var(--border);
+            padding: 6px;
+            text-align: center;
+        }
+        th {
+            background-color: #e2e8f0;
+        }
+        .timer-display {
+            font-size: 1.8rem;
+            text-align: center;
+            font-weight: bold;
+            color: var(--primary-dark);
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>GNSS Field Logger (ΕΓΣΑ '87)</h2>
+
+    <!-- Live Status Panel -->
+    <div class="card">
+        <div class="status-grid">
+            <div class="status-item">Κατάσταση GPS: <span id="gpsStatus">Αναμονή...</span></div>
+            <div class="status-item">Οριζόντιο Σφάλμα: <span id="gpsAcc">-</span> m</div>
+            <div class="status-item">X (ΕΓΣΑ87): <span id="liveX">-</span></div>
+            <div class="status-item">Y (ΕΓΣΑ87): <span id="liveY">-</span></div>
+        </div>
+    </div>
+
+    <!-- Controls Panel -->
+    <div class="card">
+        <label for="pointName">Όνομα Σημείου:</label>
+        <input type="text" id="pointName" value="P1">
+
+        <label for="sampleDuration">Χρόνος Δειγματοληψίας (sec):</label>
+        <select id="sampleDuration">
+            <option value="5">5 δευτερόλεπτα (Γρήγορο)</option>
+            <option value="15" selected>15 δευτερόλεπτα (Προτεινόμενο)</option>
+            <option value="30">30 δευτερόλεπτα (Υψηλή ακρίβεια)</option>
+            <option value="60">60 δευτερόλεπτα (Στατική μέτρηση)</option>
+        </select>
+
+        <div id="timerDisplay" class="timer-display" style="display:none;">00:15</div>
+
+        <button id="btnStart" onclick="startMeasurement()">Λήψη Σημείου (Averaging)</button>
+        <button id="btnStop" class="btn-danger" onclick="stopMeasurement()" style="display:none;">Ακύρωση Μέτρησης</button>
+    </div>
+
+    <!-- Points List Panel -->
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <h3 style="margin:0; font-size:1rem;">Αποθηκευμένα Σημεία (<span id="pointCount">0</span>)</h3>
+            <button onclick="exportCSV()" style="width: auto; padding: 6px 12px; margin:0; font-size:0.85rem;">Export CSV</button>
+        </div>
+        <div style="overflow-x: auto; max-height: 200px;">
+            <table id="pointsTable">
+                <thead>
+                    <tr>
+                        <th>Όνομα</th>
+                        <th>X (m)</th>
+                        <th>Y (m)</th>
+                        <th>Z (m)</th>
+                        <th>Σφάλμα (m)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Εγγραφές -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Ορισμός Συστήματος ΕΓΣΑ87 (EPSG:2100) στο Proj4js
+    proj4.defs("EPSG:2100", "+proj=tmerc +lat_0=0 +lon_0=24 +k=0.9996 +x_0=500000 +y_0=0 +ellps=GRS80 +towgs84=-199.87,74.79,246.62,0,0,0,0 +units=m +no_defs");
+
+    let watchId = null;
+    let currentLat = null, currentLon = null, currentAlt = null, currentAcc = null;
+    let pointsList = [];
+    let measuring = false;
+    let sampleBuffer = [];
+    let countdownTimer = null;
+
+    // Παρακολούθηση ενσωματωμένου/συνδεδεμένου GNSS δέκτη μέσω Browser Geolocation API
+    if ("geolocation" in navigator) {
+        navigator.geolocation.watchPosition(
+            (position) => {
+                currentLat = position.coords.latitude;
+                currentLon = position.coords.longitude;
+                currentAlt = position.coords.altitude || 0;
+                currentAcc = position.coords.accuracy || 0;
+
+                document.getElementById("gpsStatus").innerText = "Συνδεδεμένο";
+                document.getElementById("gpsAcc").innerText = currentAcc.toFixed(1);
+
+                // Μετατροπή σε ΕΓΣΑ87 live για προεπισκόπηση
+                let egsa = proj4("EPSG:4326", "EPSG:2100", [currentLon, currentLat]);
+                document.getElementById("liveX").innerText = egsa[0].toFixed(2);
+                document.getElementById("liveY").innerText = egsa[1].toFixed(2);
+
+                if (measuring) {
+                    sampleBuffer.push({
+                        lat: currentLat,
+                        lon: currentLon,
+                        alt: currentAlt,
+                        acc: currentAcc,
+                        x: egsa[0],
+                        y: egsa[1]
+                    });
+                }
+            },
+            (error) => {
+                document.getElementById("gpsStatus").innerText = "Σφάλμα GPS: " + error.message;
+            },
+            { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+        );
+    } else {
+        alert("Ο browser σας δεν υποστηρίζει Geolocation.");
+    }
+
+    function startMeasurement() {
+        if (!currentLat || !currentLon) {
+            alert("Δεν υπάρχει ακόμα έγκυρο στίγμα GNSS. Περιμένετε...");
+            return;
+        }
+
+        let duration = parseInt(document.getElementById("sampleDuration").value);
+        sampleBuffer = [];
+        measuring = true;
+
+        document.getElementById("btnStart").style.display = "none";
+        document.getElementById("btnStop").style.display = "block";
+        document.getElementById("sampleDuration").disabled = true;
+        document.getElementById("timerDisplay").style.display = "block";
+
+        let timeLeft = duration;
+        document.getElementById("timerDisplay").innerText = `00:${timeLeft < 10 ? '0' : ''}${timeLeft}`;
+
+        countdownTimer = setInterval(() => {
+            timeLeft--;
+            document.getElementById("timerDisplay").innerText = `00:${timeLeft < 10 ? '0' : ''}${timeLeft}`;
+
+            if (timeLeft <= 0) {
+                clearInterval(countdownTimer);
+                finalizeMeasurement();
+            }
+        }, 1000);
+    }
+
+    function stopMeasurement() {
+        clearInterval(countdownTimer);
+        measuring = false;
+        document.getElementById("btnStart").style.display = "block";
+        document.getElementById("btnStop").style.display = "none";
+        document.getElementById("sampleDuration").disabled = false;
+        document.getElementById("timerDisplay").style.display = "none";
+        sampleBuffer = [];
+    }
+
+    function finalizeMeasurement() {
+        measuring = false;
+        document.getElementById("btnStart").style.display = "block";
+        document.getElementById("btnStop").style.display = "none";
+        document.getElementById("sampleDuration").disabled = false;
+        document.getElementById("timerDisplay").style.display = "none";
+
+        if (sampleBuffer.length === 0) {
+            alert("Δεν συλλέχθηκαν επαρκή δεδομένα.");
+            return;
+        }
+
+        // Υπολογισμός μέσου όρου (Averaging) από το buffer
+        let sumX = 0, sumY = 0, sumZ = 0, sumAcc = 0;
+        let count = sampleBuffer.length;
+
+        sampleBuffer.forEach(pt => {
+            sumX += pt.x;
+            sumY += pt.y;
+            sumZ += pt.alt;
+            sumAcc += pt.acc;
+        });
+
+        let meanX = sumX / count;
+        let meanY = sumY / count;
+        let meanZ = sumZ / count;
+        let meanAcc = sumAcc / count; // Εκτίμηση μέσου σφάλματος
+
+        let name = document.getElementById("pointName").value;
+
+        // Αποθήκευση σημείου στη λίστα
+        pointsList.push({
+            name: name,
+            x: meanX,
+            y: meanY,
+            z: meanZ,
+            error: meanAcc
+        });
+
+        updateTable();
+
+        // Αυτόματη αύξηση ονόματος σημείου (π.χ. P1 -> P2)
+        let nextNum = parseInt(name.replace(/^\D+/g, '')) + 1;
+        if (!isNaN(nextNum)) {
+            document.getElementById("pointName").value = "P" + nextNum;
+        }
+
+        alert(`Το σημείο ${name} αποθηκεύτηκε επιτυχώς με ${count} μετρήσεις.`);
+    }
+
+    function updateTable() {
+        let tbody = document.getElementById("pointsTable").getElementsByTagName("tbody")[0];
+        tbody.innerHTML = "";
+        pointsList.forEach((pt, index) => {
+            let row = tbody.insertRow();
+            row.insertCell(0).innerText = pt.name;
+            row.insertCell(1).innerText = pt.x.toFixed(3);
+            row.insertCell(2).innerText = pt.y.toFixed(3);
+            row.insertCell(3).innerText = pt.z.toFixed(2);
+            row.insertCell(4).innerText = pt.error.toFixed(2);
+        });
+        document.getElementById("pointCount").innerText = pointsList.length;
+    }
+
+    function exportCSV() {
+        if (pointsList.length === 0) {
+            alert("Δεν υπάρχουν σημεία προς εξαγωγή.");
+            return;
+        }
+
+        let csvContent = "data:text/csv;charset=utf-8,Point,X_EGSA87,Y_EGSA87,Z_Elev,Error_m\r\n";
+        pointsList.forEach(pt => {
+            csvContent += `${pt.name},${pt.x.toFixed(3)},${pt.y.toFixed(3)},${pt.z.toFixed(2)},${pt.error.toFixed(2)}\r\n`;
+        });
+
+        let encodedUri = encodeURI(csvContent);
+        let link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", "gnss_points_egsa87.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('./sw.js')
+                .then((reg) => console.log('Service Worker registered successfully!', reg.scope))
+                .catch((err) => console.log('Service Worker registration failed:', err));
+        });
+    }
+
+
+</script>
+
+</body>
+</html>
