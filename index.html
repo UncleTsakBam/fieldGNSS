@@ -8,6 +8,7 @@
     <link rel="manifest" href="manifest.json">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#10b981">
+
     <!-- Proj4js για τον μετασχηματισμό WGS84 <-> EGSA87 (EPSG:2100) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
     <style>
@@ -90,24 +91,9 @@
             cursor: not-allowed;
         }
         .btn-danger { background-color: #ef4444; }
-        .btn-csv { background-color: #0284c7; }
-        .btn-kml { background-color: #0284c7;}
-        .btn-import { background-color: #d97706; }
-        
-        .file-input-wrapper {
-            position: relative;
-            overflow: hidden;
-            display: inline-block;
-            width: 100%;
-        }
-        .file-input-wrapper input[type=file] {
-            font-size: 100px;
-            position: absolute;
-            left: 0;
-            top: 0;
-            opacity: 0;
-            cursor: pointer;
-        }
+        .btn-csv { background-color: #28a745; }
+        .btn-kml { background-color: #007bff; }
+        .btn-clear { background-color: #dc3545; }
 
         table {
             width: 100%;
@@ -177,27 +163,8 @@
 
         <div id="timerDisplay" class="timer-display" style="display:none;">00:15</div>
 
-        <button id="btnStart" onclick="startMeasurement()">Λήψη Σημείου (Averaging)</button>
-        <button id="btnStop" class="btn-danger" onclick="stopMeasurement()" style="display:none;">Ακύρωση Μέτρησης</button>
-    </div>
-
-    <!-- Import & Export Panel -->
-    <div class="card">
-        <h3 style="margin:0 0 8px 0; font-size:1rem;">Διαχείριση Δεδομένων</h3>
-        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-            <div class="file-input-wrapper" style="flex: 1;">
-                <button class="btn-import" style="margin:0; padding:8px; font-size:0.85rem;">Import CSV</button>
-                <input type="file" id="csvFileInput" accept=".csv" onchange="importCSV(event)">
-            </div>
-            <div class="file-input-wrapper" style="flex: 1;">
-                <button class="btn-import" style="margin:0; padding:8px; font-size:0.85rem;">Import KML</button>
-                <input type="file" id="kmlFileInput" accept=".kml" onchange="importKML(event)">
-            </div>
-        </div>
-        <div style="display: flex; gap: 8px;">
-            <button class="btn-csv" onclick="exportCSV()" style="flex: 1; padding: 8px; margin:0; font-size:0.85rem;">Export CSV</button>
-            <button class="btn-kml" onclick="exportKML()" style="flex: 1; padding: 8px; margin:0; font-size:0.85rem;">Export KML</button>
-        </div>
+        <button type="button" id="btnStart" onclick="startMeasurement()">Λήψη Μέτρησης</button>
+        <button type="button" id="btnStop" class="btn-danger" onclick="stopMeasurement()" style="display:none;">Ακύρωση Μέτρησης</button>
     </div>
 
     <!-- Polygon Geometry Panel -->
@@ -205,8 +172,7 @@
         <h3 style="margin:0 0 8px 0; font-size:1rem;">Γεωμετρία Πολυγώνου (<span id="polyCount">0</span> σημεία)</h3>
         <div class="geom-grid">
             <div class="geom-item">Περίμετρος: <span id="polyPerimeter">-</span></div>
-            <div class="geom-item">Εμβαδό (m²): <span id="polyAreaM2">-</span></div>
-            <div class="geom-item" style="grid-column: span 2;">Εμβαδό (Στρέμματα): <span id="polyAreaStrem">-</span></div>
+            <div class="geom-item">Εμβαδό: <span id="polyAreaM2">-</span></div>
         </div>
     </div>
 
@@ -229,6 +195,16 @@
                 </tbody>
             </table>
         </div>
+    </div>
+
+    <!-- Export & Clear Panel (Placed Below Points List) -->
+    <div class="card">
+        <h3 style="margin:0 0 8px 0; font-size:1rem;">Διαχείριση & Εξαγωγή</h3>
+        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+            <button type="button" class="btn-csv" onclick="exportCSV()" style="flex: 1; padding: 10px; margin:0; font-size:0.9rem;">Εξαγωγή CSV</button>
+            <button type="button" class="btn-kml" onclick="exportKML()" style="flex: 1; padding: 10px; margin:0; font-size:0.9rem;">Εξαγωγή KML</button>
+        </div>
+        <button type="button" class="btn-clear" onclick="clearMeasurements()" style="width: 100%; padding: 10px; margin:0; font-size:0.9rem;">Καθαρισμός μετρήσεων</button>
     </div>
 </div>
 
@@ -383,7 +359,6 @@
             document.getElementById('polyCount').innerText = n;
             document.getElementById('polyPerimeter').innerText = "-";
             document.getElementById('polyAreaM2').innerText = "-";
-            document.getElementById('polyAreaStrem').innerText = "-";
             return;
         }
 
@@ -402,99 +377,23 @@
         }
 
         let areaM2 = Math.abs(doubleArea) / 2.0;
-        let areaStremmata = areaM2 / 1000.0;
 
         document.getElementById('polyCount').innerText = n;
         document.getElementById('polyPerimeter').innerText = perimeter.toFixed(2) + " m";
         document.getElementById('polyAreaM2').innerText = areaM2.toFixed(2) + " m²";
-        document.getElementById('polyAreaStrem').innerText = areaStremmata.toFixed(3) + " στρ.";
     }
 
-    function importCSV(event) {
-        let file = event.target.files[0];
-        if (!file) return;
-        let reader = new FileReader();
-        reader.onload = function(e) {
-            let lines = e.target.result.split(/\r\n|\n/);
-            let count = 0;
-            for (let i = 1; i < lines.length; i++) {
-                let line = lines[i].trim();
-                if (!line) continue;
-                let cols = line.split(',');
-                if (cols.length >= 3) {
-                    let name = cols[0].trim();
-                    let x = parseFloat(cols[1]);
-                    let y = parseFloat(cols[2]);
-                    let z = cols[3] ? parseFloat(cols[3]) : 0.0;
-                    let err = cols[4] ? parseFloat(cols[4]) : 0.0;
-
-                    let wgs84 = proj4("EPSG:2100", "EPSG:4326", [x, y]);
-
-                    pointsList.push({
-                        name: name,
-                        x: x,
-                        y: y,
-                        z: z,
-                        error: err,
-                        lat: wgs84[1],
-                        lon: wgs84[0]
-                    });
-                    count++;
-                }
-            }
+    function clearMeasurements() {
+        if (pointsList.length === 0) {
+            alert("Δεν υπάρχουν αποθηκευμένες μετρήσεις.");
+            return;
+        }
+        if (confirm("Είστε σίγουρος ότι θέλετε να διαγράψετε όλες τις μετρήσεις;")) {
+            pointsList = [];
             updateTable();
             updateGeometry();
-            event.target.value = '';
-            alert(`Εισήχθησαν ${count} σημεία από CSV.`);
-        };
-        reader.readAsText(file);
-    }
-
-    function importKML(event) {
-        let file = event.target.files[0];
-        if (!file) return;
-        let reader = new FileReader();
-        reader.onload = function(e) {
-            let parser = new DOMParser();
-            let xmlDoc = parser.parseFromString(e.target.result, "text/xml");
-            let placemarks = xmlDoc.getElementsByTagName("Placemark");
-            let count = 0;
-
-            for (let i = 0; i < placemarks.length; i++) {
-                let pm = placemarks[i];
-                let nameElem = pm.getElementsByTagName("name")[0];
-                let name = nameElem ? nameElem.textContent.trim() : `KML_${i+1}`;
-                
-                let coordElem = pm.getElementsByTagName("coordinates")[0];
-                if (coordElem) {
-                    let firstCoord = coordElem.textContent.trim().split(/\s+/)[0];
-                    let parts = firstCoord.split(',');
-                    if (parts.length >= 2) {
-                        let lon = parseFloat(parts[0]);
-                        let lat = parseFloat(parts[1]);
-                        let alt = parts[2] ? parseFloat(parts[2]) : 0;
-
-                        let egsa = proj4("EPSG:4326", "EPSG:2100", [lon, lat]);
-
-                        pointsList.push({
-                            name: name,
-                            x: egsa[0],
-                            y: egsa[1],
-                            z: alt,
-                            error: 0.0,
-                            lat: lat,
-                            lon: lon
-                        });
-                        count++;
-                    }
-                }
-            }
-            updateTable();
-            updateGeometry();
-            event.target.value = '';
-            alert(`Εισήχθησαν ${count} σημεία από KML.`);
-        };
-        reader.readAsText(file);
+            document.getElementById("pointName").value = "P1";
+        }
     }
 
     function exportCSV() {
